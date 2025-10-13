@@ -1,4 +1,6 @@
-import os, time, orjson, re, statistics, typer
+
+
+import os, time, orjson, re, statistics, typer, json
 import faiss
 from sentence_transformers import SentenceTransformer
 from utils.io_utils import ensure_dirs, read_jsonl
@@ -10,59 +12,86 @@ CHUNK_META_PATH = os.path.join(DATA_DIR, "chunk_meta.jsonl")
 FAISS_INDEX_PATH = os.path.join(DATA_DIR, "index.faiss")
 EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
+
 def embed_texts(model: SentenceTransformer, texts):
-    vecs = model.encode(texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True)
+    vecs = model.encode(
+        texts,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
     return vecs.astype("float32")
 
+
 def ask(
-    question: str = typer.Option(..., help="Your question"),
+    question: str = typer.Argument(..., help="Your question"),
     top_k: int = typer.Option(5, help="Top-k chunks to retrieve"),
     min_support: float = typer.Option(0.25, help="Minimum top similarity to avoid refusal (0..1)"),
-    model_name: str = typer.Option("mistral", help="Ollama model name (e.g., mistral, llama3)"),
+    model_name: str = typer.Option("mistral", help="Ollama model name (e.g., mistral, llama3)")
 ):
     """
     Retrieve top-k chunks and use a local Ollama model for phrased answers.
+    Includes retrieval, generation, and total latency (ms) in output.
     """
     import ollama
 
-    t0 = time.time()
+    start_time = time.time()
     ensure_dirs()
 
-    if not (os.path.exists(FAISS_INDEX_PATH) and os.path.exists(CHUNKS_PATH) and os.path.exists(CHUNK_META_PATH)):
+    if not (
+        os.path.exists(FAISS_INDEX_PATH)
+        and os.path.exists(CHUNKS_PATH)
+        and os.path.exists(CHUNK_META_PATH)
+    ):
         typer.echo(orjson.dumps({"error": "Index artifacts missing. Run index first."}).decode())
         raise typer.Exit(1)
 
+
+    retrieval_start = time.time()
     model = SentenceTransformer(EMBED_MODEL_NAME)
     q_vec = embed_texts(model, [question])
 
     index = faiss.read_index(FAISS_INDEX_PATH)
     D, I = index.search(q_vec, top_k)
+    retrieval_ms = int((time.time() - retrieval_start) * 1000)
+
     sims = D[0].tolist()
     idxs = I[0].tolist()
-
     chunks = read_jsonl(CHUNKS_PATH)
+
     results = []
     for rank, (sim, idx) in enumerate(zip(sims, idxs), start=1):
         if 0 <= idx < len(chunks):
             ch = chunks[idx]
-            snippet = ch["text"].strip()
-            url = ch["url"]
-            results.append({"rank": rank, "score": float(sim), "url": url, "snippet": snippet[:400]})
+            results.append({
+                "rank": rank,
+                "url": ch["url"],
+                "score": float(sim),
+                "snippet": ch["text"][:400].strip()
+            })
 
-    retrieval_ms = int((time.time() - t0) * 1000)
     top_score = sims[0] if sims else 0.0
+
 
     if not results or top_score < min_support:
         out = {
             "answer": "Not enough information in the crawled content to answer this question.",
             "refused": True,
-            "sources": [{"url": r["url"], "snippet": r["snippet"], "score": r["score"]} for r in results],
-            "timings": {"retrieval_ms": retrieval_ms, "total_ms": int((time.time() - t0) * 1000)},
+            "sources": [r["url"] for r in results],
+            "retrieval_count": len(results),
+            "timings": {
+                "retrieval_ms": retrieval_ms,
+                "llm_ms": 0,
+                "total_ms": int((time.time() - start_time) * 1000)
+            }
         }
         typer.echo(orjson.dumps(out).decode())
         return
 
-    context_text = "\n\n".join([f"Source {i+1} ({r['url']}): {r['snippet']}" for i, r in enumerate(results)])
+    
+    context_text = "\n\n".join(
+        [f"Source {r['rank']} ({r['url']}): {r['snippet']}" for r in results]
+    )
     prompt = f"""You are a helpful assistant. Use ONLY the provided context to answer the user's question.
 If the context does not contain enough information, respond with "Not enough information."
 
@@ -73,24 +102,33 @@ Context:
 
 Answer clearly and concisely using only the information above:"""
 
+    ensure_ollama_model(model_name)
+    llm_start = time.time()
     try:
-        ensure_ollama_model(model_name)
-        llm_start = time.time()
         response = ollama.chat(model=model_name, messages=[{"role": "user", "content": prompt}])
-        answer_text = response["message"]["content"].strip()
         llm_ms = int((time.time() - llm_start) * 1000)
+        answer_text = response["message"]["content"].strip()
     except Exception as e:
+        llm_ms = int((time.time() - llm_start) * 1000)
         answer_text = f"Ollama generation failed: {e}"
-        llm_ms = 0
 
-    total_ms = int((time.time() - t0) * 1000)
+    total_ms = int((time.time() - start_time) * 1000)
+
+    
     out = {
         "answer": answer_text,
-        "refused": False,
-        "sources": [{"url": r["url"], "score": r["score"]} for r in results],
-        "timings": {"retrieval_ms": retrieval_ms, "llm_ms": llm_ms, "total_ms": total_ms},
+        "sources": [r["url"] for r in results],
+        "retrieval_count": len(results),
+        "timings": {
+            "retrieval_ms": retrieval_ms,
+            "llm_ms": llm_ms,
+            "total_ms": total_ms
+        }
     }
     typer.echo(orjson.dumps(out).decode())
+
+
+
 
 def eval(
     file: str = typer.Option(..., help="Path to a text file with one question per line"),
@@ -100,9 +138,12 @@ def eval(
 ):
     """
     Run multiple questions and report p50/p95 latencies, refusal rate, and avg answer length.
+    Logs observability metrics and saves results to data/eval_log.json.
     """
     import ollama
     ensure_dirs()
+
+    
     if not (os.path.exists(FAISS_INDEX_PATH) and os.path.exists(CHUNKS_PATH)):
         typer.echo(orjson.dumps({"error": "Index missing. Run crawl/index first."}).decode())
         raise typer.Exit(1)
@@ -157,7 +198,7 @@ Context:
 Answer:"""
             llm_start = time.time()
             try:
-                resp = ollama.chat(model=model_name, messages=[{"role":"user","content":prompt}])
+                resp = ollama.chat(model=model_name, messages=[{"role": "user", "content": prompt}])
                 answer_text = resp["message"]["content"].strip()
             except Exception as e:
                 answer_text = f"Ollama generation failed: {e}"
@@ -169,25 +210,41 @@ Answer:"""
         refusals += 1 if refused or answer_text.lower().startswith("not enough information") else 0
         answers_len += len(answer_text)
 
-        results.append({"question": q, "answer": answer_text, "refused": refused, "sources": srcs,
-                        "timings": {"retrieval_ms": retrieval_ms, "llm_ms": llm_ms, "total_ms": total_ms}})
+        results.append({
+            "question": q,
+            "answer": answer_text,
+            "refused": refused,
+            "sources": srcs,
+            "timings": {"retrieval_ms": retrieval_ms, "llm_ms": llm_ms, "total_ms": total_ms}
+        })
 
+    
     def p50(xs): return int(statistics.median(xs)) if xs else 0
     def p95(xs):
-        if not xs: return 0
+        if not xs:
+            return 0
         xs_sorted = sorted(xs)
-        idx = min(len(xs_sorted)-1, int(round(0.95*(len(xs_sorted)-1))))
+        idx = min(len(xs_sorted) - 1, int(round(0.95 * (len(xs_sorted) - 1))))
         return int(xs_sorted[idx])
 
+    
     report = {
         "n": len(questions),
         "refusal_rate": round(refusals / max(1, len(questions)), 3),
         "answer_len_avg": int(answers_len / max(1, len(questions))),
         "latency_ms": {
-            "retrieval_p50": p50(retrieval_times), "retrieval_p95": p95(retrieval_times),
-            "llm_p50": p50(llm_times),             "llm_p95": p95(llm_times),
-            "total_p50": p50(total_times),         "total_p95": p95(total_times),
+            "retrieval_p50": p50(retrieval_times),
+            "retrieval_p95": p95(retrieval_times),
+            "llm_p50": p50(llm_times),
+            "llm_p95": p95(llm_times),
+            "total_p50": p50(total_times),
+            "total_p95": p95(total_times),
         },
-        "samples": results[:3]
+        "samples": results[:3],
     }
+
+   
+    with open(os.path.join(DATA_DIR, "eval_log.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
     typer.echo(orjson.dumps(report).decode())
+    typer.echo("\n✅ Evaluation report saved to data/eval_log.json")
