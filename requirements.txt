@@ -1,0 +1,10 @@
+typer[all]
+requests
+beautifulsoup4
+trafilatura
+tldextract
+orjson
+sentence-transformers
+faiss-cpu
+tqdm
+ollama

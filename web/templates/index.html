@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini RAG Web</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background-color: #111;
+      color: #eee;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      background: #1b1b1b;
+      border-radius: 10px;
+      padding: 20px 30px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.4);
+    }
+    h1, h2 {
+      text-align: left;
+      color: #4ea3ff;
+    }
+    button {
+      background-color: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    input {
+      background: #222;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 8px;
+    }
+    pre {
+      background: #0d0d0d;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    .section {
+      margin-top: 30px;
+      border-top: 1px solid #333;
+      padding-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Mini RAG Web Interface</h1>
+
+    
+    <div class="section">
+      <h2>1️⃣ Crawl Website</h2>
+      <form id="crawlForm">
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="text" name="url" id="url" placeholder="https://example.com" style="flex: 1;" required />
+          <input type="number" name="max_pages" id="max_pages" placeholder="Max pages" min="1" max="50" value="5" style="width: 120px;" />
+          <button type="submit">Crawl</button>
+        </div>
+      </form>
+      <pre id="crawlOutput"></pre>
+    </div>
+
+    
+    <div class="section">
+      <h2>2️⃣ Build Index</h2>
+      <button id="indexBtn">Run Indexing</button>
+      <pre id="indexOutput"></pre>
+    </div>
+
+    
+    <div class="section">
+      <h2>3️⃣ Ask a Question</h2>
+      <form id="askForm">
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="text" name="question" placeholder="Ask a question" style="flex: 1;" required />
+          <button type="submit">Ask</button>
+        </div>
+      </form>
+      <pre id="askOutput"></pre>
+    </div>
+  </div>
+
+  <script>
+    
+    async function postData(url, formData) {
+      const response = await fetch(url, { method: "POST", body: formData });
+      return await response.json();
+    }
+
+    
+    document.getElementById("crawlForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = await postData("/crawl", formData);
+      document.getElementById("crawlOutput").textContent = JSON.stringify(data, null, 2);
+    };
+
+    
+    document.getElementById("indexBtn").onclick = async () => {
+      const data = await postData("/index", new FormData());
+      document.getElementById("indexOutput").textContent = JSON.stringify(data, null, 2);
+    };
+
+    
+    document.getElementById("askForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = await postData("/ask", formData);
+      document.getElementById("askOutput").textContent = JSON.stringify(data, null, 2);
+    };
+  </script>
+</body>
+</html>
