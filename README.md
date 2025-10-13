@@ -26,7 +26,7 @@ Built with Flask, SentenceTransformers, ChromaDB, and local Mistral (Ollama).
    ```
    Opens at http://127.0.0.1:5000
 
-4. (Optional) Run from CLI
+4. Run from CLI
    ```bash
    python main.py crawl https://www.python.org/psf/ --max-pages 2
    python main.py index
@@ -96,5 +96,31 @@ Local text generation powered by [Ollama](https://ollama.ai) using the Mistral m
 
 ---
 
-**License:** MIT License  
-(c) 2025 Ayush Singh. All rights reserved.
+SOME OUTPUTS
+
+1)python website
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/b4bd9281-ea34-4e30-9cfc-1cb752461eb2" />
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/092f3aba-e138-417f-96d8-01b8e38bfd2c" />
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/6185f752-2607-4d22-984b-5303edec3a18" />
+
+
+---
+
+2)Wikipedia
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/69c646c2-6b6e-46e5-a635-5229d747e60b" />
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/249fdf19-8919-4d38-919b-d313076529e4" />
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/0c9d0d4d-9787-4eec-b862-89beb3c2ce85" />
+
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/066df705-e95b-4b2a-b365-c1641aededa4" />
+
+
+
+
+
+
